@@ -1,0 +1,13 @@
+[project]
+name = "frameflow"
+version = "0.0.1"
+description = "Backend-agnostic dataframe execution framework"
+authors = [{name = "Mukovhe Mukwevho"}]
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = []
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
