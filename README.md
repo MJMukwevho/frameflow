@@ -11,4 +11,117 @@ multiple engines such as:
 
 Frameflow uses an adapter architecture to abstract execution engines.
 
-Status: Early development.
+Status: Early development. Only the pandas engine works today, and the API below is the target, not what is implemented yet. See the [Development Plan](#development-plan).
+
+---
+
+## Target API
+
+```python
+from frameflow import Session, col
+
+session = Session(engine="polars")  # or "pandas", "spark"
+
+result = (
+    session.read_csv("sales.csv")
+    .filter(col("amount") > 100)
+    .group_by("product")
+    .agg(total=col("amount").sum())
+    .sort("total", descending=True)
+    .collect()
+)
+
+result.to_pandas()  # or .to_polars(), .to_dicts()
+```
+
+Changing `engine` is the only change needed to run the same pipeline on another engine.
+
+---
+
+## How It Works
+
+Frameflow separates **describing** a pipeline from **running** it:
+
+```mermaid
+flowchart LR
+    U[Your code<br/>col, filter, group_by ...] --> P[Logical plan<br/>engine-independent]
+    P --> A{Engine adapter}
+    A --> PD[pandas]
+    A --> PL[Polars lazy API]
+    A --> SP[PySpark]
+```
+
+1. **Expressions** (`col("amount") > 100`) are Frameflow objects, never engine objects, so user code can't depend on one engine.
+2. **Operations** (`filter`, `group_by`, `join`, ...) don't run straight away. They add a step to a **logical plan**.
+3. **`collect()`** (or a write) hands the plan to the selected **engine adapter**, which translates it into that engine's native, ideally lazy, API and runs it.
+
+This keeps adapters small (they translate a plan, rather than implementing dozens of methods) and lets Polars and Spark optimise the whole query.
+
+---
+
+## Development Plan
+
+### Phase 0: Foundations
+- [x] Project structure, `uv` and `pytest` setup
+- [x] Base `EngineAdapter` contract (`adapters/base.py`)
+- [x] `Session` entry point and engine selector
+- [x] Pandas adapter (eager)
+- [x] `FrameflowDataFrame` wrapper, so engine dataframes don't leak to users
+- [ ] One public API style: method chaining on `FrameflowDataFrame`; `Session` only reads data and selects the engine
+- [ ] Exception types in `exceptions.py` (`UnsupportedEngineError`, `UnsupportedOperationError`, ...)
+- [ ] Optional extras: `frameflow[polars]`, `frameflow[spark]`, `frameflow[parquet]`, `frameflow[excel]`
+- [ ] CI with GitHub Actions: `ruff`, `mypy`, `pytest` on every pull request
+
+### Phase 1: Expressions and logical plan (on pandas)
+- [ ] Expression API in `api/column.py`: `col`, `lit`, comparisons, arithmetic, `&` / `|` / `~`, `is_null`, `alias`
+- [ ] Aggregations: `sum`, `mean`, `min`, `max`, `count`
+- [ ] Logical plan nodes in `core/contracts.py`: read, select, filter, with_columns, group_by + agg, join, union, sort, limit
+- [ ] Plan execution in `core/dispatcher.py`, with adapters looked up through `core/registry.py`
+- [ ] Pandas adapter rewritten to execute plans
+- [ ] **Engine conformance test suite**: the same tests, inputs and expected results run against every engine
+
+### Phase 2: Polars engine
+- [ ] Polars adapter that translates plans into Polars' lazy API
+- [ ] Conformance suite passing on Polars
+
+### Phase 3: Spark engine
+- [ ] Spark adapter that translates plans into PySpark DataFrames
+- [ ] Conformance suite passing on a local Spark session in CI
+
+### Phase 4: Breadth and correctness
+- [ ] More operations: `rename`, `drop`, `distinct`, `when` / `otherwise`, string and date functions
+- [ ] Schema and dtype API
+- [ ] Defined, tested behaviour where engines differ: nulls, null join keys, integer division, sort stability
+- [ ] `collect()` returns a result with `.to_pandas()`, `.to_polars()` and `.to_dicts()`
+- [ ] Clear `UnsupportedOperationError` when an engine can't run an operation
+
+### Phase 5: Release 0.1.0
+- [ ] Documentation with examples for each engine
+- [ ] Engine support matrix (which operations each engine supports)
+- [ ] Changelog and semantic versioning
+- [ ] Publish to PyPI
+
+---
+
+## Design Principles
+
+- **No engine leaks.** Users never receive or pass pandas, Polars or Spark objects unless they ask for one explicitly (`to_pandas()`, ...).
+- **Same input, same output.** An operation is only supported on an engine once the conformance suite proves it gives the same result as the others.
+- **Lazy by default.** Nothing runs until `collect()` or a write, so engines can optimise the whole pipeline.
+- **Small core, optional engines.** Installing Frameflow doesn't pull in Polars or Spark; each engine is an optional extra.
+- **A focused API.** Around 20 operations that cover real pipelines, rather than mirroring all of pandas.
+
+### Related projects
+
+[Narwhals](https://github.com/narwhals-dev/narwhals) and [Ibis](https://ibis-project.org/) also offer one dataframe API across several engines. Frameflow focuses on data-engineering pipelines: reading from and writing to data lakes, with Spark as a first-class engine.
+
+---
+
+## Development
+
+Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
+
+```bash
+uv sync           # install dependencies, including dev tools
+uv run pytest     # run the tests
+```
