@@ -11,7 +11,7 @@ multiple engines such as:
 
 Frameflow uses an adapter architecture to abstract execution engines.
 
-Status: Early development. Only the pandas engine works today, and the API below is the target, not what is implemented yet. See the [Development Plan](#development-plan).
+Status: Early development. Only the pandas engine works today, and the API below is the target, not what is implemented yet (expressions such as `col(...)` arrive in Phase 1). See the [Development Plan](#development-plan).
 
 ---
 
@@ -67,10 +67,10 @@ This keeps adapters small (they translate a plan, rather than implementing dozen
 - [x] `Session` entry point and engine selector
 - [x] Pandas adapter (eager)
 - [x] `FrameflowDataFrame` wrapper, so engine dataframes don't leak to users
-- [ ] One public API style: method chaining on `FrameflowDataFrame`; `Session` only reads data and selects the engine
-- [ ] Exception types in `exceptions.py` (`UnsupportedEngineError`, `UnsupportedOperationError`, ...)
-- [ ] Optional extras: `frameflow[polars]`, `frameflow[spark]`, `frameflow[parquet]`, `frameflow[excel]`
-- [ ] CI with GitHub Actions: `ruff`, `mypy`, `pytest` on every pull request
+- [x] One public API style: method chaining on `FrameflowDataFrame`; `Session` only reads data and selects the engine
+- [x] Exception types in `exceptions.py` (`UnsupportedEngineError`, `UnsupportedOperationError`, ...)
+- [x] Optional extras: `frameflow[polars]`, `frameflow[spark]`, `frameflow[parquet]`, `frameflow[excel]`
+- [x] CI with GitHub Actions: `ruff`, `mypy`, `pytest` on every pull request
 
 ### Phase 1: Expressions and logical plan (on pandas)
 - [ ] Expression API in `api/column.py`: `col`, `lit`, comparisons, arithmetic, `&` / `|` / `~`, `is_null`, `alias`
@@ -117,11 +117,50 @@ This keeps adapters small (they translate a plan, rather than implementing dozen
 
 ---
 
+## Current API (pandas)
+
+```python
+from frameflow import Session
+
+session = Session(engine="pandas")
+
+top = (
+    session.read_csv("sales.csv")
+    .filter(lambda df: df["amount"] > 100)  # engine-specific until Phase 1
+    .select(["product", "amount"])
+    .sort("amount", descending=True)
+)
+top.write_parquet("top_sales.parquet")  # needs frameflow[parquet]
+
+totals = top.group_by("product").agg({"amount": "sum"}).collect()  # list of dicts
+```
+
+`Session` only reads data and picks the engine; every other operation is a method on the returned dataframe.
+
+Optional extras:
+
+| Extra     | Installs   | Needed for                        |
+|-----------|------------|-----------------------------------|
+| `parquet` | `pyarrow`  | `read_parquet`, `write_parquet`   |
+| `excel`   | `openpyxl` | `read_excel`, `write_excel`       |
+| `polars`  | `polars`   | the Polars engine (Phase 2)       |
+| `spark`   | `pyspark`  | the Spark engine (Phase 3)        |
+| `all`     | all of the above |                             |
+
+If an extra is missing, Frameflow raises `MissingDependencyError` with the `pip install` command to fix it.
+
+---
+
 ## Development
 
 Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-uv sync           # install dependencies, including dev tools
-uv run pytest     # run the tests
+uv sync                  # install dependencies, including dev tools
+uv run pytest            # tests
+uv run ruff check        # lint
+uv run ruff format       # format
+uv run mypy              # type check
 ```
+
+CI runs the same checks on every pull request and push to `main`, with tests on Python 3.10 to 3.13.

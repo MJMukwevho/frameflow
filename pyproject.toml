@@ -10,11 +10,40 @@ dependencies = [
     "pandas>=2.3.3",
 ]
 
+# Engines and file formats are optional, so a pandas user doesn't install Spark:
+#   pip install "frameflow[parquet,excel]"
+[project.optional-dependencies]
+parquet = ["pyarrow>=15"]
+excel = ["openpyxl>=3.1"]
+polars = ["polars>=1.0"]
+spark = ["pyspark>=3.5"]
+all = ["frameflow[parquet,excel,polars,spark]"]
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
 dev = [
+    "mypy>=1.13",
+    "pandas-stubs>=2.2",
     "pytest>=9.0.2",
+    "ruff>=0.8",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, pyupgrade, bugbear
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+check_untyped_defs = true
+warn_unused_ignores = true

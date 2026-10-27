@@ -3,65 +3,45 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
-from frameflow.api.dataframe import FrameflowDataFrame
-from frameflow.session import Session
+from frameflow import FrameflowDataFrame, Session, UnsupportedEngineError
 
 
-def test_session_does_not_leak_pandas_dataframe(tmp_path: Path) -> None:
-    input_path = tmp_path / "sales.csv"
-
-    source_df = pd.DataFrame(
-        {
-            "product": ["A", "B", "C"],
-            "amount": [100, 250, 50],
-        }
-    )
-    source_df.to_csv(input_path, index=False)
-
-    session = Session(engine="pandas")
-
-    df = session.read_csv(str(input_path))
+def test_session_does_not_leak_pandas_dataframe(session: Session, sales_csv: str) -> None:
+    df = session.read_csv(sales_csv)
 
     assert isinstance(df, FrameflowDataFrame)
     assert not isinstance(df, pd.DataFrame)
 
 
-def test_session_select_does_not_leak_pandas_dataframe(tmp_path: Path) -> None:
-    input_path = tmp_path / "sales.csv"
+def test_read_json(session: Session, tmp_path: Path) -> None:
+    path = tmp_path / "sales.json"
+    pd.DataFrame({"product": ["A"], "amount": [100]}).to_json(path, orient="records")
 
-    source_df = pd.DataFrame(
-        {
-            "product": ["A", "B", "C"],
-            "amount": [100, 250, 50],
-        }
-    )
-    source_df.to_csv(input_path, index=False)
+    df = session.read_json(str(path))
 
-    session = Session(engine="pandas")
-
-    df = session.read_csv(str(input_path))
-    selected = session.select(df, ["product", "amount"])
-
-    assert isinstance(selected, FrameflowDataFrame)
-    assert not isinstance(selected, pd.DataFrame)
+    assert df.collect() == [{"product": "A", "amount": 100}]
 
 
-def test_session_filter_does_not_leak_pandas_dataframe(tmp_path: Path) -> None:
-    input_path = tmp_path / "sales.csv"
+def test_session_only_reads_data(session: Session) -> None:
+    # Transformations and writes live on FrameflowDataFrame, not the session
+    for name in ("select", "filter", "join", "write_csv"):
+        assert not hasattr(session, name)
 
-    source_df = pd.DataFrame(
-        {
-            "product": ["A", "B", "C"],
-            "amount": [100, 250, 50],
-        }
-    )
-    source_df.to_csv(input_path, index=False)
 
-    session = Session(engine="pandas")
+@pytest.mark.parametrize("engine", ["polars", "spark"])
+def test_planned_engines_raise_a_clear_error(engine: str) -> None:
+    with pytest.raises(UnsupportedEngineError, match="planned but not implemented"):
+        Session(engine=engine)
 
-    df = session.read_csv(str(input_path))
-    filtered = session.filter(df, lambda frame: frame["amount"] > 100)
 
-    assert isinstance(filtered, FrameflowDataFrame)
-    assert not isinstance(filtered, pd.DataFrame)
+def test_unknown_engine_lists_supported_engines() -> None:
+    with pytest.raises(UnsupportedEngineError, match="Supported engines: pandas"):
+        Session(engine="duckdb")
+
+
+def test_unsupported_engine_error_is_still_a_value_error() -> None:
+    # Code that caught the old ValueError keeps working
+    with pytest.raises(ValueError):
+        Session(engine="duckdb")

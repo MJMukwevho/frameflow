@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pandas as pd
 
-from frameflow.adapters.base import EngineAdapter
+from frameflow.adapters.base import EngineAdapter, JoinHow
+from frameflow.exceptions import MissingDependencyError
+
+
+@contextmanager
+def _requires(package: str, extra: str) -> Iterator[None]:
+    """Turn pandas' ImportError for an optional dependency into a Frameflow error."""
+    try:
+        yield
+    except ImportError as error:
+        raise MissingDependencyError(package, extra) from error
 
 
 class PandasAdapter(EngineAdapter):
@@ -22,10 +34,12 @@ class PandasAdapter(EngineAdapter):
         return pd.read_json(path, **kwargs)
 
     def read_parquet(self, path: str, **kwargs) -> pd.DataFrame:
-        return pd.read_parquet(path, **kwargs)
+        with _requires("pyarrow", "parquet"):
+            return pd.read_parquet(path, **kwargs)
 
     def read_excel(self, path: str, **kwargs) -> pd.DataFrame:
-        return pd.read_excel(path, **kwargs)
+        with _requires("openpyxl", "excel"):
+            return pd.read_excel(path, **kwargs)
 
     # -------------------------
     # Write operations
@@ -37,16 +51,18 @@ class PandasAdapter(EngineAdapter):
         df.to_json(path, **kwargs)
 
     def write_parquet(self, df: pd.DataFrame, path: str, **kwargs) -> None:
-        df.to_parquet(path, index=False, **kwargs)
+        with _requires("pyarrow", "parquet"):
+            df.to_parquet(path, index=False, **kwargs)
 
     def write_excel(self, df: pd.DataFrame, path: str, **kwargs) -> None:
-        df.to_excel(path, index=False, **kwargs)
+        with _requires("openpyxl", "excel"):
+            df.to_excel(path, index=False, **kwargs)
 
     # -------------------------
     # Data operations
     # -------------------------
-    def select(self, df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
-        return df.loc[:, columns]
+    def select(self, df: pd.DataFrame, columns: Iterable[str]) -> pd.DataFrame:
+        return df.loc[:, list(columns)]
 
     def filter(self, df: pd.DataFrame, condition: Any) -> pd.DataFrame:
         """
@@ -69,7 +85,7 @@ class PandasAdapter(EngineAdapter):
         left: pd.DataFrame,
         right: pd.DataFrame,
         on: str | list[str],
-        how: str = "inner",
+        how: JoinHow = "inner",
     ) -> pd.DataFrame:
         return left.merge(right, on=on, how=how)
 
